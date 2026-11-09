@@ -9,6 +9,7 @@ _work/
 # Docker/runtime files
 .docker/
 *.log
+deployment-artifacts/
 
 # Python caches
 __pycache__/

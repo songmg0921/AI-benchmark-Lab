@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import secrets
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, Response
@@ -9,7 +10,11 @@ app = FastAPI(title="AI Benchmark Lab", version="0.1.0")
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "service": "ai-benchmark-lab", "version": app.version}
+    return {"status": "ok", "service": "ai-benchmark-lab", "version": os.getenv("APP_VERSION", app.version)}
+
+@app.get("/api/version")
+def version():
+    return {"service": "ai-benchmark-lab", "version": os.getenv("APP_VERSION", app.version)}
 
 @app.get("/api/network/ping")
 def ping():

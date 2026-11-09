@@ -96,6 +96,8 @@ jobs:
       CONTAINER_NAME: ai-benchmark-lab
       HOST_PORT: "8000"
     steps:
+      - name: Check out monitoring script
+        uses: actions/checkout@v4
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
@@ -110,8 +112,14 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($username)) { throw 'DOCKERHUB_USERNAME is empty.' }
           $image = '{0}/{1}:latest' -f $username, $env:IMAGE_NAME
           $container = $env:CONTAINER_NAME
+          $artifactDir = Join-Path $env:GITHUB_WORKSPACE 'deployment-artifacts'
+          New-Item -ItemType Directory -Force $artifactDir | Out-Null
+          $monitorLog = Join-Path $artifactDir 'service-monitor.jsonl'
+          $monitor = $null
 
           try {
+            $monitor = Start-Process powershell -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',"$env:GITHUB_WORKSPACE\scripts\monitor-service.ps1",'-Url',"http://127.0.0.1:$($env:HOST_PORT)/api/health",'-DurationSeconds','120','-IntervalSeconds','1','-LogPath',$monitorLog) -PassThru
+            Start-Sleep -Seconds 5
             $pulled = $false
             for ($attempt = 1; $attempt -le 3; $attempt++) {
               docker pull $image
@@ -122,7 +130,7 @@ jobs:
 
             # The existing container owns the published host port, so replace it first.
             docker rm -f $container 2>$null
-            docker run --detach --name $container --publish "${env:HOST_PORT}:8000" --restart unless-stopped $image
+            docker run --detach --name $container --publish "${env:HOST_PORT}:8000" --env "APP_VERSION=${env:GITHUB_SHA}" --restart unless-stopped $image
             if ($LASTEXITCODE -ne 0) { throw 'Failed to start replacement container.' }
 
             $healthy = $false
@@ -135,10 +143,35 @@ jobs:
             }
             if (-not $healthy) { throw 'Replacement container did not pass /api/health.' }
 
+            Start-Sleep -Seconds 30
             Write-Host "Deployed $image as $container"
           } catch {
             Write-Host 'Deployment failed. Container diagnostics:'
             docker ps -a --filter "name=$container"
             docker logs $container 2>$null
             throw
+          } finally {
+            if ($monitor -and -not $monitor.HasExited) { Stop-Process -Id $monitor.Id -Force }
           }
+
+      - name: Write deployment summary
+        if: always()
+        shell: powershell
+        run: |
+          $log = Join-Path $env:GITHUB_WORKSPACE 'deployment-artifacts\service-monitor.jsonl'
+          if (Test-Path $log) {
+            $rows = @(Get-Content $log -Encoding UTF8 | ForEach-Object { $_ | ConvertFrom-Json })
+            $ok = @($rows | Where-Object { $_.analysisOk -eq $true }).Count
+            $failed = $rows.Count - $ok
+            $gaps = @(); for($i=1;$i -lt $rows.Count;$i++){ $gaps += ([datetime]$rows[$i].start-[datetime]$rows[$i-1].end).TotalSeconds }
+            $maxGap = if ($gaps.Count) { [math]::Round(($gaps | Measure-Object -Maximum).Maximum,2) } else { 'N/A' }
+            "## Deployment monitoring`n`n- URL: http://127.0.0.1:$env:HOST_PORT/api/health`n- Requests: $($rows.Count)`n- Success: $ok`n- Failure: $failed`n- Max unobserved gap (seconds): $maxGap`n- Log: deployment-artifacts/service-monitor.jsonl" >> $env:GITHUB_STEP_SUMMARY
+          } else { '## Deployment monitoring`n`nMonitoring log was not created.' >> $env:GITHUB_STEP_SUMMARY }
+
+      - name: Upload deployment logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-monitor-${{ github.run_id }}
+          path: deployment-artifacts/
+          if-no-files-found: warn
