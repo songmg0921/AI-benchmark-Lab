@@ -1,3 +1,4 @@
+# AI Benchmark Lab CI/CD workflow
 name: Test, Build and Publish Docker image
 on:
   push:
