@@ -156,7 +156,7 @@ jobs:
 
       - name: Write deployment summary
         if: always()
-        shell: powershell
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command "& '{0}'"
         run: |
           $log = Join-Path $env:GITHUB_WORKSPACE 'deployment-artifacts\service-monitor.jsonl'
           if (Test-Path $log) {
