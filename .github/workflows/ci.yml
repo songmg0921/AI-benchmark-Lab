@@ -117,10 +117,13 @@ jobs:
           $monitorLog = Join-Path $artifactDir 'service-monitor.jsonl'
           $phasePath = Join-Path $artifactDir 'phase.txt'
           Set-Content -Path $phasePath -Value 'pre' -Encoding UTF8
+          New-Item -ItemType File -Force -Path $monitorLog | Out-Null
           $monitor = $null
 
           try {
-            $monitor = Start-Process powershell -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',"$env:GITHUB_WORKSPACE\scripts\monitor-service.ps1",'-Url',"http://127.0.0.1:$($env:HOST_PORT)/api/health",'-DurationSeconds','120','-IntervalSeconds','1','-LogPath',$monitorLog,'-PhasePath',$phasePath) -PassThru
+            $monitorScript = Join-Path $env:GITHUB_WORKSPACE 'scripts\monitor-service.ps1'
+            $monitorArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$monitorScript`" -Url `"http://127.0.0.1:$($env:HOST_PORT)/api/health`" -DurationSeconds 120 -IntervalSeconds 1 -LogPath `"$monitorLog`" -PhasePath `"$phasePath`""
+            $monitor = Start-Process powershell.exe -ArgumentList $monitorArgs -PassThru -WindowStyle Hidden
             Start-Sleep -Seconds 5
             $pulled = $false
             for ($attempt = 1; $attempt -le 3; $attempt++) {
@@ -190,7 +193,10 @@ jobs:
             $summary += ''
             $summary += 'Raw UTF-8 log: `deployment-artifacts/service-monitor.jsonl`'
             $summary -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8
-          } else { '## Deployment monitoring`n`nMonitoring log was not created.' >> $env:GITHUB_STEP_SUMMARY }
+          } else {
+            $fallback = @('## Deployment monitoring', '', 'Monitoring log was not created.', "Expected path: $log", "Workspace: $env:GITHUB_WORKSPACE", 'The deployment step may have failed before the monitor process started.')
+            $fallback -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8
+          }
 
       - name: Upload deployment logs
         if: always()

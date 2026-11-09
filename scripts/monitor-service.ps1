@@ -6,6 +6,8 @@ param(
   [Parameter(Mandatory=$true)][string]$LogPath
 )
 $ErrorActionPreference = 'Continue'
+$parent = Split-Path -Parent $LogPath
+New-Item -ItemType Directory -Force -Path $parent | Out-Null
 $utf8 = New-Object System.Text.UTF8Encoding($false)
 $writer = New-Object System.IO.StreamWriter($LogPath, $false, $utf8)
 $start = Get-Date
