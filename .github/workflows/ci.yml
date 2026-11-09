@@ -4,6 +4,7 @@ on:
   push:
     branches: ["**"]
   pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
 env:
@@ -35,7 +36,7 @@ jobs:
           exit 1
 
   publish:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     needs: test
     runs-on: ubuntu-latest
     env:
@@ -85,7 +86,7 @@ jobs:
 
   deploy:
     name: Deploy latest image to Windows runner
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     needs: publish
     runs-on: [self-hosted, Windows, X64]
     env:
