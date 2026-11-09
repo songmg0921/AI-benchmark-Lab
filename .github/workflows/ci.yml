@@ -115,10 +115,12 @@ jobs:
           $artifactDir = Join-Path $env:GITHUB_WORKSPACE 'deployment-artifacts'
           New-Item -ItemType Directory -Force $artifactDir | Out-Null
           $monitorLog = Join-Path $artifactDir 'service-monitor.jsonl'
+          $phasePath = Join-Path $artifactDir 'phase.txt'
+          Set-Content -Path $phasePath -Value 'pre' -Encoding UTF8
           $monitor = $null
 
           try {
-            $monitor = Start-Process powershell -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',"$env:GITHUB_WORKSPACE\scripts\monitor-service.ps1",'-Url',"http://127.0.0.1:$($env:HOST_PORT)/api/health",'-DurationSeconds','120','-IntervalSeconds','1','-LogPath',$monitorLog) -PassThru
+            $monitor = Start-Process powershell -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',"$env:GITHUB_WORKSPACE\scripts\monitor-service.ps1",'-Url',"http://127.0.0.1:$($env:HOST_PORT)/api/health",'-DurationSeconds','120','-IntervalSeconds','1','-LogPath',$monitorLog,'-PhasePath',$phasePath) -PassThru
             Start-Sleep -Seconds 5
             $pulled = $false
             for ($attempt = 1; $attempt -le 3; $attempt++) {
@@ -128,6 +130,7 @@ jobs:
             }
             if (-not $pulled) { throw "Docker pull failed after 3 attempts: $image" }
 
+            Set-Content -Path $phasePath -Value 'deploying' -Encoding UTF8
             # The existing container owns the published host port, so replace it first.
             docker rm -f $container 2>$null
             docker run --detach --name $container --publish "${env:HOST_PORT}:8000" --env "APP_VERSION=${env:GITHUB_SHA}" --restart unless-stopped $image
@@ -143,6 +146,7 @@ jobs:
             }
             if (-not $healthy) { throw 'Replacement container did not pass /api/health.' }
 
+            Set-Content -Path $phasePath -Value 'post' -Encoding UTF8
             Start-Sleep -Seconds 30
             Write-Host "Deployed $image as $container"
           } catch {
@@ -165,7 +169,27 @@ jobs:
             $failed = $rows.Count - $ok
             $gaps = @(); for($i=1;$i -lt $rows.Count;$i++){ $gaps += ([datetime]$rows[$i].start-[datetime]$rows[$i-1].end).TotalSeconds }
             $maxGap = if ($gaps.Count) { [math]::Round(($gaps | Measure-Object -Maximum).Maximum,2) } else { 'N/A' }
-            "## Deployment monitoring`n`n- URL: http://127.0.0.1:$env:HOST_PORT/api/health`n- Requests: $($rows.Count)`n- Success: $ok`n- Failure: $failed`n- Max unobserved gap (seconds): $maxGap`n- Log: deployment-artifacts/service-monitor.jsonl" >> $env:GITHUB_STEP_SUMMARY
+            $versions = @($rows | Where-Object { $_.version } | Select-Object -ExpandProperty version -Unique) -join ' -> '
+            $intervals = if ($gaps.Count) { [math]::Round(($rows.Count / ([datetime]$rows[-1].end - [datetime]$rows[0].start).TotalSeconds),2) } else { 'N/A' }
+            $continuity = if ($failed -eq 0 -and $maxGap -ne 'N/A' -and [double]$maxGap -le 3) { 'PASS - no failed response observed; no unobserved gap over 3 seconds' } else { 'INCONCLUSIVE/FAIL - inspect failed responses or unobserved gaps' }
+            $summary = @()
+            $summary += '## Deployment monitoring and zero-downtime evidence'
+            $summary += ''
+            $summary += "- Verification URL: http://127.0.0.1:$env:HOST_PORT/api/health"
+            $summary += "- Observation window: $($rows[0].start) to $($rows[-1].end) (UTC)"
+            $summary += "- Requests: $($rows.Count) | Success: $ok | Failure: $failed"
+            $summary += "- Observed request rate: $intervals requests/second | Maximum unobserved gap: $maxGap seconds"
+            $summary += "- Version transition observed: $versions"
+            $summary += "- Observed continuity result: $continuity"
+            $summary += ''
+            $summary += '| Phase | Requests | Success | Failure | Representative response |'
+            $summary += '|---|---:|---:|---:|---|'
+            foreach($phase in @('pre','deploying','post')) { $part=@($rows|Where-Object{$_.phase -eq $phase}); $pOk=@($part|Where-Object{$_.analysisOk -eq $true}).Count; $rep=if($part.Count){"$($part[0].status) / $($part[0].responseMs) ms / $($part[0].version)"}else{'not observed'}; $summary += "| $phase | $($part.Count) | $pOk | $($part.Count-$pOk) | $rep |" }
+            $summary += ''
+            $summary += 'A zero-downtime claim applies only to this observed request window. Any unobserved gap is explicitly reported above.'
+            $summary += ''
+            $summary += 'Raw UTF-8 log: `deployment-artifacts/service-monitor.jsonl`'
+            $summary -join "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8
           } else { '## Deployment monitoring`n`nMonitoring log was not created.' >> $env:GITHUB_STEP_SUMMARY }
 
       - name: Upload deployment logs
