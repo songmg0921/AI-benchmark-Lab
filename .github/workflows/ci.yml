@@ -192,7 +192,7 @@ jobs:
             $summary += ''
             $summary += '| Phase | Requests (ok/total) | Representative response | UTC start | HTTP | Analysis | Response revision | Result |'
             $summary += '|---|---:|---|---|---:|---|---|---|'
-            foreach($phase in @('pre','deploying','post')) { $part=@($rows|Where-Object{$_.phase -eq $phase}); $pOk=@($part|Where-Object{$_.analysisOk -eq $true}).Count; $rep=if($part.Count){$part[0]}else{$null}; $err=if($rep -and $rep.error){$rep.error}else{'OK'}; $summary += "| $phase | $pOk/$($part.Count) | $($rep.responseMs) ms | $($rep.start) | $($rep.status) | $($rep.analysisOk) | $($rep.version) | $err |" }
+            foreach($phase in @('pre','deploying','post')) { $part=@($rows|Where-Object{$_.phase -eq $phase}); $pOk=@($part|Where-Object{$_.analysisOk -eq $true}).Count; $rep=if($part.Count){$part[0]}else{$null}; $err=if(-not $part.Count){'NOT OBSERVED'}elseif($rep.error){$rep.error}else{'OK'}; $summary += "| $phase | $pOk/$($part.Count) | $($rep.responseMs) ms | $($rep.start) | $($rep.status) | $($rep.analysisOk) | $($rep.version) | $err |" }
             $summary += ''
             $summary += 'A zero-downtime claim applies only to this observed request window. Any unobserved gap is explicitly reported above.'
             $summary += ''

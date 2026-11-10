@@ -2,6 +2,7 @@ $ErrorActionPreference = 'Stop'
 $root=$env:GITHUB_WORKSPACE; $art=Join-Path $root 'deployment-artifacts'; New-Item -ItemType Directory -Force $art|Out-Null
 $log=Join-Path $art 'service-monitor.jsonl'; $phase=Join-Path $art 'phase.txt'; New-Item -ItemType File -Force $log|Out-Null; Set-Content $phase 'pre' -Encoding UTF8
 $monitor=Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$root\scripts\monitor-service.ps1`" -Url `"http://127.0.0.1:8000/api/health`" -DurationSeconds 150 -IntervalSeconds 1 -LogPath `"$log`" -PhasePath `"$phase`"" -PassThru -WindowStyle Hidden
+Start-Sleep -Seconds 10
 try {
   $network='ai-benchmark-net'; $proxy='ai-benchmark-proxy'; $blue='ai-benchmark-blue'; $green='ai-benchmark-green'; $username=[string]$env:DOCKERHUB_USERNAME; $username=$username.Trim().ToLowerInvariant(); if([string]::IsNullOrWhiteSpace($username)){throw 'DOCKERHUB_USERNAME is empty'}; $image='{0}/{1}:latest' -f $username,$env:IMAGE_NAME
   try { docker network create $network 2>$null } catch { }
