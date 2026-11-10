@@ -9,11 +9,11 @@ try {
   $candidate=if($active -eq $blue){$green}else{$blue}; $port=if($candidate -eq $blue){18001}else{18002}; Set-Content $phase 'deploying' -Encoding UTF8
   docker pull $image; if($LASTEXITCODE){throw "docker pull failed for image $image"}; try { docker rm -f $candidate 2>$null } catch { }; docker run -d --name $candidate --network $network -p "${port}:8000" --env "APP_VERSION=$env:GITHUB_SHA" --restart unless-stopped $image; if($LASTEXITCODE){throw 'candidate container failed'}
   $ready=$false; for($i=0;$i -lt 30;$i++){try{$r=Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$port/api/health" -TimeoutSec 3;if($r.StatusCode -eq 200){$ready=$true;break}}catch{};Start-Sleep 2}; if(-not $ready){throw 'candidate health check failed'}
-  $conf=Join-Path $art 'nginx.conf'; @('server {','  listen 80;','  location / {',"    proxy_pass http://host.docker.internal:$port;",'    proxy_set_header Host $host;','    proxy_set_header X-Real-IP $remote_addr;','  }','}')|Set-Content $conf -Encoding UTF8
+  $conf=Join-Path $art 'nginx.conf'; $confLines=@('server {','  listen 80;','  location / {',"    proxy_pass http://host.docker.internal:$port;",'    proxy_set_header Host $host;','    proxy_set_header X-Real-IP $remote_addr;','  }','}'); [IO.File]::WriteAllText($conf,($confLines -join "`n"),(New-Object Text.UTF8Encoding($false)))
   $running=(docker ps --filter "name=^$proxy$" --filter status=running --format '{{.Names}}'); if(-not $running){
     # One-time migration: the legacy app container may still own port 8000.
     $legacy=(docker ps --filter "name=^$env:CONTAINER_NAME$" --filter status=running --format '{{.Names}}'); if($legacy){docker rm -f $legacy 2>$null}
     try{docker rm -f $proxy 2>$null}catch{}; docker run -d --name $proxy --network $network -p 8000:80 --add-host host.docker.internal:host-gateway --mount "type=bind,source=$conf,target=/etc/nginx/conf.d/default.conf,readonly" nginx:1.27-alpine
   }else{docker cp $conf "$proxy`:/etc/nginx/conf.d/default.conf";docker exec $proxy nginx -s reload}
   Start-Sleep 5; $check=Invoke-WebRequest -UseBasicParsing http://127.0.0.1:8000/api/health -TimeoutSec 5;if($check.StatusCode -ne 200){throw 'proxy health check failed'}; Set-Content $phase 'post' -Encoding UTF8; if($active){docker rm -f $active 2>$null}; Start-Sleep 30
-} catch {docker ps -a;try{docker logs $candidate 2>$null}catch{};throw} finally {if($monitor -and -not $monitor.HasExited){Stop-Process $monitor.Id -Force}}
+} catch {docker ps -a;try{docker logs $proxy 2>&1}catch{};try{docker logs $candidate 2>$null}catch{};throw} finally {if($monitor -and -not $monitor.HasExited){Stop-Process $monitor.Id -Force}}
