@@ -105,6 +105,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Pull and replace local container
+        if: ${{ false }}
         shell: powershell -NoProfile -ExecutionPolicy Bypass -Command "& '{0}'"
         run: |
           $ErrorActionPreference = 'Stop'
@@ -161,6 +162,10 @@ jobs:
             if ($monitor -and -not $monitor.HasExited) { Stop-Process -Id $monitor.Id -Force }
           }
 
+      - name: Blue-green deploy with proxy switch
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -Command "& '{0}'"
+        run: .\scripts\deploy-bluegreen.ps1
+
       - name: Write deployment summary
         if: always()
         shell: powershell -NoProfile -ExecutionPolicy Bypass -Command "& '{0}'"
@@ -185,9 +190,9 @@ jobs:
             $summary += "- Version transition observed: $versions"
             $summary += "- Observed continuity result: $continuity"
             $summary += ''
-            $summary += '| Phase | Requests | Success | Failure | Representative response |'
-            $summary += '|---|---:|---:|---:|---|'
-            foreach($phase in @('pre','deploying','post')) { $part=@($rows|Where-Object{$_.phase -eq $phase}); $pOk=@($part|Where-Object{$_.analysisOk -eq $true}).Count; $rep=if($part.Count){"$($part[0].status) / $($part[0].responseMs) ms / $($part[0].version)"}else{'not observed'}; $summary += "| $phase | $($part.Count) | $pOk | $($part.Count-$pOk) | $rep |" }
+            $summary += '| Phase | Requests (ok/total) | Representative response | UTC start | HTTP | Analysis | Response revision | Result |'
+            $summary += '|---|---:|---|---|---:|---|---|---|'
+            foreach($phase in @('pre','deploying','post')) { $part=@($rows|Where-Object{$_.phase -eq $phase}); $pOk=@($part|Where-Object{$_.analysisOk -eq $true}).Count; $rep=if($part.Count){$part[0]}else{$null}; $err=if($rep -and $rep.error){$rep.error}else{'OK'}; $summary += "| $phase | $pOk/$($part.Count) | $($rep.responseMs) ms | $($rep.start) | $($rep.status) | $($rep.analysisOk) | $($rep.version) | $err |" }
             $summary += ''
             $summary += 'A zero-downtime claim applies only to this observed request window. Any unobserved gap is explicitly reported above.'
             $summary += ''
